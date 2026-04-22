@@ -19,10 +19,6 @@ Accurately tracks and separates metrics into:
 
 This project utilizes CMake wrapped in a standard Makefile.
 
-```
-```text?code_stdout&code_event_index=2
-README.md created successfully
-
 ```bash
 make          # Builds the project in Release mode
 make clean    # Removes build artifacts and the bin folder
@@ -42,13 +38,31 @@ If no path is provided, it defaults to recursively searching the current directo
 * `--exclude <folder>` : Skips a specific folder name during directory traversal. Can be used multiple times.
 * `--ignore-file <filename>` : Reads a file (like `.gitignore`) and skips any directories listed inside it.
 
-#### Examples
+#### Example Commands
 ```bash
 # Standard Run (Ignoring specific folders)
 ./bin/codecount --exclude build --exclude bin --exclude scratch .
 
 # Using an existing .gitignore
 ./bin/codecount --ignore-file .gitignore .
+```
+
+#### Example Output
+```text
+145     ./src/main.cpp
+82      ./src/logger.cpp
+24      ./include/logger.hpp
+
+
+TOTALS...
+
+Lines of Code   = 251
+File Count      = 3
+Code Lines      = 220
+Format Lines    = 31
+Comment Lines   = 45
+Blank Lines     = 60
+Total Lines     = 356
 ```
 
 ---
@@ -68,9 +82,33 @@ python3 doc_metrics.py [options] <path1> <path2> ...
 #### Options
 * `--exclude <folder>` : Skips a specific folder name during traversal (defaults to ignoring `build`, `bin`, `.git`, and `.vscode`). Can be used multiple times.
 
-#### Example
+#### Example Command
 ```bash
 python3 doc_metrics.py --exclude scratch .
+```
+
+#### Example Output
+```text
+File                                               | Metrics
+--------------------------------------------------------------------------------
+./design/architecture.puml                         | Entities: 12 | Relationships: 18
+./devlog/2026-04-21-update.md                      | Words: 450 | Tasks: 3/5
+./devlog/todo.md                                   | Words: 120 | Tasks: 10/12
+
+================================================================================
+TOTALS
+================================================================================
+Markdown & Text Files: 2
+  - Lines          : 145
+  - Words          : 570
+  - Headers        : 8
+  - Open Tasks     : 4
+  - Completed Tasks: 13
+
+PlantUML Files: 1
+  - Lines          : 45
+  - UML Entities   : 12
+  - Relationships  : 18
 ```
 
 ---
