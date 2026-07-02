@@ -13,7 +13,7 @@ bin_path    := $(mkfile_path)bin
 MOOSECOUNT   := $(bin_path)/moosecount
 MOOSEMETRICS := python3 $(mkfile_path)moosemetrics.py
 
-.PHONY: all build clean install uninstall metrics code-metrics doc-metrics
+.PHONY: all build clean test install uninstall metrics code-metrics doc-metrics
 
 all: build
 
@@ -25,6 +25,10 @@ build:
 clean:
 	@rm -rf $(build_path)
 	@rm -rf $(bin_path)
+
+test: build
+	@echo "--- Running Integration Tests ---"
+	@python3 tests/run_tests.py
 
 # --- System Installation Targets ---
 
