@@ -1,8 +1,11 @@
 #include <iostream>
 #include <fstream>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
+#include <map>
+#include <algorithm>
 #include <unordered_set>
 #include <cctype>
 
@@ -31,7 +34,6 @@ const int FLAG_CODE = 1;
 const int FLAG_FORMAT = 2;
 const int FLAG_COMMENT = 4;
 
-// Trims whitespace from both ends of a string (useful for parsing ignore files)
 std::string trim(const std::string &str)
 {
   size_t first = str.find_first_not_of(" \t\r\n");
@@ -41,20 +43,20 @@ std::string trim(const std::string &str)
   return str.substr(first, (last - first + 1));
 }
 
-bool processFile(const fs::path &path, CountTotals &allTotals)
+std::optional<CountTotals> processFile(const fs::path &path)
 {
   std::ifstream file(path, std::ios::binary);
   if (!file.is_open())
   {
     std::cerr << "Error unable to open file: " << path << '\n';
-    return false;
+    return std::nullopt;
   }
 
-  // Load entire file into memory for fast processing
   std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
   CountTotals fileTotals;
   ParserState state = ParserState::Normal;
+  char stringDelimiter = '\0';
   int lineFlag = FLAG_BLANK;
 
   auto tallyLine = [&]()
@@ -74,7 +76,6 @@ bool processFile(const fs::path &path, CountTotals &allTotals)
     if (lineFlag == FLAG_BLANK)
       fileTotals.blankLines++;
 
-    // Reset for the next line
     lineFlag = FLAG_BLANK;
     if (state == ParserState::InSingleComment)
       state = ParserState::Normal;
@@ -101,17 +102,18 @@ bool processFile(const fs::path &path, CountTotals &allTotals)
       {
         state = ParserState::InSingleComment;
         lineFlag |= FLAG_COMMENT;
-        i++; // Skip next char
+        i++;
       }
       else if (c == '/' && next_c == '*')
       {
         state = ParserState::InMultiComment;
         lineFlag |= FLAG_COMMENT;
-        i++; // Skip next char
+        i++;
       }
-      else if (c == '"')
+      else if (c == '"' || c == '\'' || c == '`')
       {
         state = ParserState::InString;
+        stringDelimiter = c;
         lineFlag |= FLAG_CODE;
       }
       else if (c == '{' || c == '}')
@@ -127,8 +129,11 @@ bool processFile(const fs::path &path, CountTotals &allTotals)
 
     case ParserState::InString:
       lineFlag |= FLAG_CODE;
-      // Check for end of string, ignoring escaped quotes
-      if (c == '"' && content[i - 1] != '\\')
+      if (c == '\\')
+      {
+        i++; // skip escaped character, handles \\ correctly
+      }
+      else if (c == stringDelimiter)
       {
         state = ParserState::Normal;
       }
@@ -143,7 +148,7 @@ bool processFile(const fs::path &path, CountTotals &allTotals)
       if (c == '*' && next_c == '/')
       {
         state = ParserState::Normal;
-        i++; // Skip next char
+        i++;
       }
       break;
     }
@@ -155,26 +160,18 @@ bool processFile(const fs::path &path, CountTotals &allTotals)
     tallyLine();
   }
 
-  std::cout << (fileTotals.codeLines + fileTotals.formatLines) << "\t" << path.string() << '\n';
-
-  allTotals.totalLines += fileTotals.totalLines;
-  allTotals.blankLines += fileTotals.blankLines;
-  allTotals.codeLines += fileTotals.codeLines;
-  allTotals.formatLines += fileTotals.formatLines;
-  allTotals.commentLines += fileTotals.commentLines;
-  allTotals.fileCount++;
-
-  return true;
+  return fileTotals;
 }
 
 int main(int argc, char *argv[])
 {
   std::unordered_set<std::string> ignoredItems;
   std::vector<std::string> searchPaths;
+  bool sortByCount = false;
 
-  // Default extensions
   std::unordered_set<std::string> targetExtensions = {
-      ".c", ".cc", ".cpp", ".h", ".hh", ".hpp", ".m", ".mm"};
+      ".c", ".cc", ".cpp", ".h", ".hh", ".hpp", ".m", ".mm",
+      ".java", ".cs", ".js", ".ts", ".kt", ".swift", ".go", ".rs"};
 
   // Parse Command Line Arguments
   for (int i = 1; i < argc; ++i)
@@ -183,6 +180,21 @@ int main(int argc, char *argv[])
     if (arg == "--exclude" && i + 1 < argc)
     {
       ignoredItems.insert(argv[++i]);
+    }
+    else if (arg == "--ext" && i + 1 < argc)
+    {
+      std::string ext = argv[++i];
+      if (ext[0] != '.')
+        ext = "." + ext;
+      targetExtensions.insert(ext);
+    }
+    else if (arg == "--no-defaults")
+    {
+      targetExtensions.clear();
+    }
+    else if (arg == "--sort")
+    {
+      sortByCount = true;
     }
     else if (arg == "--ignore-file" && i + 1 < argc)
     {
@@ -213,17 +225,25 @@ int main(int argc, char *argv[])
     }
     else
     {
-      std::cerr << "Usage: codecount [--exclude <folder>] [--ignore-file <filename>] <path1> <path2> ...\n";
+      std::cerr << "Usage: moosecount [--exclude <folder>] [--ignore-file <filename>] [--ext <extension>] [--no-defaults] [--sort] <path1> <path2> ...\n";
       return 1;
     }
   }
 
   if (searchPaths.empty())
   {
-    searchPaths.push_back("."); // Default to current directory
+    searchPaths.push_back(".");
   }
 
   CountTotals allTotals;
+  std::map<std::string, long> extDisplayLines;
+
+  struct FileResult
+  {
+    std::string path;
+    long displayLines;
+  };
+  std::vector<FileResult> fileResults;
 
   // Execute File Traversal
   for (const auto &basePath : searchPaths)
@@ -236,7 +256,18 @@ int main(int argc, char *argv[])
 
     if (fs::is_regular_file(basePath))
     {
-      processFile(basePath, allTotals);
+      if (auto result = processFile(basePath))
+      {
+        long display = result->codeLines + result->formatLines;
+        fileResults.push_back({basePath, display});
+        extDisplayLines[fs::path(basePath).extension().string()] += display;
+        allTotals.totalLines += result->totalLines;
+        allTotals.blankLines += result->blankLines;
+        allTotals.codeLines += result->codeLines;
+        allTotals.formatLines += result->formatLines;
+        allTotals.commentLines += result->commentLines;
+        allTotals.fileCount++;
+      }
       continue;
     }
 
@@ -256,16 +287,38 @@ int main(int argc, char *argv[])
         continue;
       }
 
-      // Process matching files
       if (entry.is_regular_file() && filename[0] != '.')
       {
         if (targetExtensions.count(entry.path().extension().string()))
         {
-          processFile(entry.path(), allTotals);
+          if (auto result = processFile(entry.path()))
+          {
+            long display = result->codeLines + result->formatLines;
+            fileResults.push_back({entry.path().string(), display});
+            extDisplayLines[entry.path().extension().string()] += display;
+            allTotals.totalLines += result->totalLines;
+            allTotals.blankLines += result->blankLines;
+            allTotals.codeLines += result->codeLines;
+            allTotals.formatLines += result->formatLines;
+            allTotals.commentLines += result->commentLines;
+            allTotals.fileCount++;
+          }
         }
       }
       ++it;
     }
+  }
+
+  if (sortByCount)
+  {
+    std::sort(fileResults.begin(), fileResults.end(),
+              [](const FileResult &a, const FileResult &b)
+              { return a.displayLines > b.displayLines; });
+  }
+
+  for (const auto &fr : fileResults)
+  {
+    std::cout << fr.displayLines << "\t" << fr.path << '\n';
   }
 
   // Display Totals
@@ -277,6 +330,15 @@ int main(int argc, char *argv[])
   std::cout << "Comment Lines   = " << allTotals.commentLines << '\n';
   std::cout << "Blank Lines     = " << allTotals.blankLines << '\n';
   std::cout << "Total Lines     = " << allTotals.totalLines << '\n';
+
+  if (extDisplayLines.size() > 1)
+  {
+    std::cout << "\nBy Extension\n";
+    for (const auto &[ext, lines] : extDisplayLines)
+    {
+      std::cout << "  " << ext << "\t= " << lines << '\n';
+    }
+  }
 
   return 0;
 }

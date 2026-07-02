@@ -2,7 +2,7 @@
 
 A personalized, lightweight toolchain for tracking project metrics across both executable code and design documentation.
 
-1. **`moosecount`**: A fast, C++17 command-line tool for parsing C-style codebases (`.c`, `.cpp`, `.h`, `.m`, etc.).
+1. **`moosecount`**: A fast, C++17 command-line tool for parsing C-style codebases (`.c`, `.cpp`, `.java`, `.ts`, and more).
 2. **`moosemetrics`**: A Python 3 script for extracting structural metrics from Markdown, Text, and PlantUML design files.
 
 ---
@@ -52,9 +52,15 @@ moosecount [options] <path1> <path2> ...
 ```
 *(If no path is provided, it searches the current directory).*
 
+**Default Extensions:**
+`.c` `.cc` `.cpp` `.h` `.hh` `.hpp` `.m` `.mm` `.java` `.cs` `.js` `.ts` `.kt` `.swift` `.go` `.rs`
+
 **Options:**
 * `--exclude <folder>` : Skips a specific folder name during directory traversal. Can be used multiple times.
 * `--ignore-file <filename>` : Reads a file (like `.gitignore`) and skips any directories listed inside it.
+* `--ext <extension>` : Adds a file extension to the search (e.g. `--ext .lua` or `--ext lua`). Can be used multiple times.
+* `--no-defaults` : Clears the default extension set. Use with `--ext` to target only specific languages (e.g. `--no-defaults --ext .java`).
+* `--sort` : Sorts the per-file output by line count, highest first.
 
 **Example Run & Output:**
 ```bash
@@ -114,5 +120,4 @@ PlantUML Files: 1
   - Lines          : 45
   - UML Entities   : 12
   - Relationships  : 18
-```
 ```
