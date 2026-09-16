@@ -1,0 +1,9 @@
+# File-level rules apply, not just folder rules
+*.gen.cpp
+generated/
+
+# ...but a later '!' rule puts one back
+!keep_me.gen.cpp
+
+# A negation cannot rescue a file inside an excluded folder, same as git
+!generated/special.cpp

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(MooseCount)
+project(MooseCount VERSION 0.2.0)
 
 # Force C++17 Standard
 set(CMAKE_CXX_STANDARD 17)
@@ -16,3 +16,6 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} -O3 -flto")
 
 # Renamed the executable
 add_executable(moosecount main.cpp)
+
+# So --version reports the number declared above, not one copied by hand
+target_compile_definitions(moosecount PRIVATE MOOSECOUNT_VERSION="${PROJECT_VERSION}")

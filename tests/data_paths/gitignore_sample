@@ -1,0 +1,4 @@
+# Stands in for a .gitignore; exercised by --ignore-file
+/anchored_root/
+src/generated/
+**/temp_out/

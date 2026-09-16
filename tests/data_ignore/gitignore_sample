@@ -1,0 +1,3 @@
+# Stands in for a .gitignore; exercised by --ignore-file
+*build*/
+vendor_libs/

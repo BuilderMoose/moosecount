@@ -1,0 +1,3 @@
+# Top-level rules; apply to this whole fixture tree
+vendor/
+/root_only/

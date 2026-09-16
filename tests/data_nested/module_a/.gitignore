@@ -1,0 +1,3 @@
+# Nested rules; must apply only inside module_a, relative to module_a
+generated/
+/local_build/

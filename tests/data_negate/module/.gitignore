@@ -1,0 +1,2 @@
+# A deeper file overrides the rule it inherited from the parent
+!drop_me.gen.cpp
