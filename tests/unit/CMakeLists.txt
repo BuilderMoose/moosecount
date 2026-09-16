@@ -9,9 +9,11 @@ set(BINARY_NAME tester)
 
 set(TEST_SOURCE_FILES
   testerMain.cpp
+  testDocument.cpp
   testGlobMatch.cpp
   testIgnoreRules.cpp
   testParser.cpp
+  testReport.cpp
   testLanguages.cpp
 )
 

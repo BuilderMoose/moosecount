@@ -6,10 +6,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Moose Metrics Suite: two independent metrics tools shipped from one repo.
 
-- **`moosecount`** — C++17 tool that counts lines of source in eleven languages, each parsed by its own `LanguageSpec`. `MoosecountLib` (`src/`) holds the work; `main.cpp` is the CLI.
-- **`moosemetrics`** — Python 3 single-file script (`moosemetrics.py`) that counts structure in Markdown/Text and PlantUML files.
+- **`moosecount`** — counts lines of source in eleven languages, each parsed by its own `LanguageSpec`.
+- **`moosemetrics`** — counts structure in Markdown/Text and PlantUML documents.
 
-They share no code. The only coupling is the CLI convention (`--exclude <folder>`, positional paths defaulting to `.`) and the `Makefile` that builds, tests, and installs both.
+Both are thin CLIs over `MoosecountLib` (`src/`), which owns traversal, the ignore rules, option parsing and the renderers. That sharing is the point: the two tools previously diverged on what `--exclude` meant, and the library is what stops it happening again. `main.cpp` and `metrics_main.cpp` hold only what is specific to each.
+
+| File | Holds |
+| --- | --- |
+| `src/counting.hpp` | `CountTotals`, the four code categories |
+| `src/language.hpp/.cpp` | `LanguageSpec`, the registry, extension lookup |
+| `src/parser.hpp/.cpp` | one state machine, driven by a `LanguageSpec` |
+| `src/document.hpp/.cpp` | `DocumentTotals`, the Markdown and PlantUML scanners |
+| `src/ignore.hpp/.cpp` | the rule engine |
+| `src/walker.hpp/.cpp` | `walkFiles()` plus the two report builders |
+| `src/options.hpp/.cpp` | shared flag parsing, help, version |
+| `src/report.hpp/.cpp` | `renderText()`, `renderJson()`, `jsonEscape()` |
+
+`walkFiles()` is the seam: it does traversal, ignore rules and extension filtering, then hands each surviving file to a callback. `countPaths()` and `countDocumentPaths()` are both built on it, so neither tool has its own copy of the hard part.
 
 ## Build & Install
 
@@ -35,15 +48,7 @@ make metrics        # runs both
 
 ## moosecount architecture
 
-Everything except the command line lives in `MoosecountLib` (`src/`), so the unit tests link it rather than shelling out to the binary. `main.cpp` is argument parsing and output formatting only.
-
-| File | Holds |
-| --- | --- |
-| `src/counting.hpp` | `CountTotals`, the four categories |
-| `src/language.hpp/.cpp` | `LanguageSpec`, the registry, extension lookup |
-| `src/parser.hpp/.cpp` | one state machine, driven by a `LanguageSpec` |
-| `src/ignore.hpp/.cpp` | the rule engine |
-| `src/walker.hpp/.cpp` | traversal and aggregation |
+Everything except the command lines lives in `MoosecountLib`, so the unit tests link it rather than shelling out to a binary.
 
 `countSource(content, language)` is a single-pass character state machine (Normal / InString / InLineComment / InBlockComment). Per line it accumulates a bitmask of `FLAG_CODE | FLAG_FORMAT | FLAG_COMMENT`; `tallyLine()` fires on `\n` (plus once more at EOF if the file lacks a trailing newline) and resolves the mask into the counters. `processFile()` is a thin wrapper that reads a file and calls it — the in-memory form is what the tests drive.
 
@@ -101,13 +106,20 @@ The README documents every flag and shows the exact output format, including the
 
 ## moosemetrics architecture
 
-Single-file CLI using `argparse`. Parses `.md`/`.txt` files (lines, words, headers, open/completed tasks via `- [ ]`/`- [x]`) and `.puml`/`.pu`/`.wsd` files (UML entities and relationships, both by regex). Default exclusions are `build`, `bin`, `.git`, `.vscode`, plus anything passed via `--exclude`; unlike moosecount, exclusions are checked against *all* path parts, not just the directory being traversed.
+`src/document.cpp` scans `.md`/`.txt` for lines, words, headers and open/completed tasks, and `.puml`/`.pu`/`.wsd` for UML entities and relationships. These are line-oriented scans, not `std::regex`, and the rules were transcribed from the Python script this replaced so the numbers would not move.
+
+Two details that a rewrite gets wrong by default, both pinned by tests:
+
+- A bare `#` **is** a header. CommonMark allows an empty ATX heading, and the old script's `^#{1,6}\s` matched the newline. Requiring content after the hashes silently drops them.
+- Sub-totals are suppressed for a document kind with no files, because the script's `defaultdict` had no keys to print.
+
+Default exclusions (`build`, `bin`, `.git`, `.vscode`) are seeded as ordinary ignore rules in `metrics_main.cpp`, so they behave like every other rule.
 
 ## Testing
 
 Two suites, both run by `make test`.
 
-**Unit tests** — `tests/unit/`, googletest vendored as a submodule under `google/`. They link `MoosecountLib` directly: `testParser.cpp` and `testLanguages.cpp` drive `countSource()` with source held in memory, `testIgnoreRules.cpp` and `testGlobMatch.cpp` cover the rule engine. Run `./bin/tester` alone, and `--gtest_filter=TestLanguagesFixture.*` for one suite.
+**Unit tests** — `tests/unit/`, googletest vendored as a submodule under `google/`. They link `MoosecountLib` directly: `testParser.cpp` and `testLanguages.cpp` drive `countSource()` with source held in memory, `testDocument.cpp` does the same for document metrics, `testIgnoreRules.cpp` and `testGlobMatch.cpp` cover the rule engine, and `testReport.cpp` covers rendering and JSON escaping. Run `./bin/tester` alone, and `--gtest_filter=TestLanguagesFixture.*` for one suite.
 
 **Integration tests** — `tests/run_tests.py` runs the built binary against the fixture trees and regex-matches the `Key = Value` totals block in stdout against hardcoded expectations. Two consequences:
 

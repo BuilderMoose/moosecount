@@ -3,7 +3,7 @@
 A personalized, lightweight toolchain for tracking project metrics across both executable code and design documentation.
 
 1. **`moosecount`**: A fast, C++17 command-line tool that counts source in eleven languages, each parsed by its own rules.
-2. **`moosemetrics`**: A Python 3 script for extracting structural metrics from Markdown, Text, and PlantUML design files.
+2. **`moosemetrics`**: A companion tool for extracting structural metrics from Markdown, Text, and PlantUML design files. Both binaries are built from one library, so they share the same ignore rules and the same command line.
 
 ---
 
@@ -73,7 +73,8 @@ _(If no path is provided, it searches the current directory)._
 - `--gitignore` : Discovers and honors every `.gitignore` in the tree as it walks, the way git itself does. Rules in a nested `.gitignore` apply only to that folder and below, and anchored rules inside it are relative to that folder — so a submodule's `.gitignore` no longer leaks into its siblings. Combines with `--exclude` and `--ignore-file`.
 - `--ext <extension>` : Adds an extension to the scanned set (the leading dot is optional, so `--ext py` and `--ext .py` are equivalent). Can be used multiple times.
 - `--no-defaults` : Clears the built-in extension list so that only extensions added with `--ext` are scanned.
-- `--sort` : Orders the per-file listing by line count, largest first, instead of traversal order.
+- `--sort` : Orders the per-file listing by line count, largest first. Without it, files are listed by path. Either way the order is deterministic, so two runs can be diffed against each other.
+- `--json` : Emits the report as JSON instead of a table. See [JSON output](#json-output).
 - `-h`, `--help` : Prints the full option list and rule syntax, then exits.
 - `-v`, `--version` : Prints the version, then exits.
 
@@ -205,9 +206,11 @@ Tracks architectural complexity and task completion. It extracts Word counts, Op
 moosemetrics [options] <path1> <path2> ...
 ```
 
-**Options:**
+**Options:** the same as `moosecount` — `--exclude`, `--ignore-file`, `--gitignore`, `--ext`, `--no-defaults`, `--sort`, `--json`, `--help`, `--version` — taking the identical [ignore rule syntax](#ignore-rule-syntax). The two tools share one implementation of that, so a rule means the same thing to both.
 
-- `--exclude <folder>` : Skips a specific folder name during traversal (defaults to ignoring `build`, `bin`, `.git`, and `.vscode`). Can be used multiple times.
+`build`, `bin`, `.git` and `.vscode` are excluded by default.
+
+Documents scanned by default: `.md` and `.txt` as Markdown, `.puml`, `.pu` and `.wsd` as PlantUML.
 
 **Example Run & Output:**
 
@@ -239,7 +242,34 @@ PlantUML Files: 1
 
 ---
 
-## 3. Testing
+## 3. JSON output
+
+Both tools take `--json`, emitting the same envelope so one consumer can read
+either:
+
+```json
+{
+  "schemaVersion": 1,
+  "tool": "moosecount",
+  "version": "0.4.0",
+  "totals": { "files": 17, "linesOfCode": 496, "code": 335, "format": 161,
+              "comment": 41, "blank": 70, "total": 605 },
+  "languages": [ { "name": "C/C++", "files": 12, "linesOfCode": 420, "...": 0 } ],
+  "files":     [ { "path": "src/parser.cpp", "language": "C/C++", "...": 0 } ],
+  "warnings":  [ { "kind": "unmatchedRule", "subject": "tetss",
+                   "message": "--exclude \"tetss\" matched nothing" } ]
+}
+```
+
+moosemetrics substitutes `kinds` for `languages` and reports document fields —
+`words`, `headers`, `openTasks`, `completedTasks`, `umlEntities`,
+`relationships`.
+
+Warnings appear both on stderr and in the document, so a job capturing only
+stdout still sees them. `schemaVersion` is there so a consumer can tell when
+the shape changes.
+
+## 4. Testing
 
 Two suites, both run by `make test`:
 

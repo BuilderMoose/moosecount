@@ -1,4 +1,5 @@
 import subprocess
+import json
 import re
 import sys
 import os
@@ -6,6 +7,7 @@ import os
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 BIN_PATH = os.path.join(PROJECT_ROOT, "bin", "moosecount")
+METRICS_PATH = os.path.join(PROJECT_ROOT, "bin", "moosemetrics")
 
 # The exact totals we expect from analyzing tests/data/
 EXPECTED_TOTALS = {
@@ -133,6 +135,126 @@ def test_help_and_version():
         passed = False
     else:
         print("PASS: an unrecognized flag exits non-zero and explains itself on stderr")
+
+    return passed
+
+def test_json_output():
+    """Verifies --json carries the same numbers as the table it replaces."""
+    print("\n--- JSON output ---")
+    data_path = os.path.join(SCRIPT_DIR, "data_paths")
+    passed = True
+
+    text_output, text_totals = run_moosecount([data_path])
+    json_output, _ = run_moosecount(["--json", data_path])
+
+    try:
+        document = json.loads(json_output)
+    except ValueError as error:
+        print(f"FAIL: --json did not emit valid JSON: {error}")
+        return False
+    print("PASS: --json emits parseable JSON")
+
+    if document.get("schemaVersion") != 1:
+        print(f"FAIL: expected schemaVersion 1, got {document.get('schemaVersion')!r}")
+        passed = False
+    elif document.get("tool") != "moosecount":
+        print(f"FAIL: expected tool 'moosecount', got {document.get('tool')!r}")
+        passed = False
+    else:
+        print("PASS: envelope names the tool and schema version")
+
+    # The two renderers must never disagree about the numbers
+    pairs = [
+        ("File Count", document["totals"]["files"]),
+        ("Code Lines", document["totals"]["code"]),
+        ("Format Lines", document["totals"]["format"]),
+        ("Comment Lines", document["totals"]["comment"]),
+        ("Blank Lines", document["totals"]["blank"]),
+        ("Total Lines", document["totals"]["total"]),
+        ("Lines of Code", document["totals"]["linesOfCode"]),
+    ]
+    for label, from_json in pairs:
+        if not check(f"{label} (text vs json)", from_json, text_totals.get(label)):
+            passed = False
+
+    if len(document["files"]) != text_totals.get("File Count"):
+        print("FAIL: the files array does not match the reported file count")
+        passed = False
+    else:
+        print("PASS: the files array matches the file count")
+
+    # Per-file totals have to sum to the grand totals
+    summed = sum(entry["code"] for entry in document["files"])
+    if summed != document["totals"]["code"]:
+        print(f"FAIL: per-file code lines sum to {summed}, totals say {document['totals']['code']}")
+        passed = False
+    else:
+        print("PASS: per-file totals sum to the grand totals")
+
+    # Warnings reach the document, not just stderr
+    json_output, _ = run_moosecount(["--json", "--exclude", "no_such_folder", data_path])
+    document = json.loads(json_output)
+    kinds = [w["kind"] for w in document["warnings"]]
+    if "unmatchedRule" not in kinds:
+        print(f"FAIL: expected an unmatchedRule warning in the document, got {kinds}")
+        passed = False
+    else:
+        print("PASS: warnings are carried in the document")
+
+    return passed
+
+def test_moosemetrics():
+    """Verifies moosemetrics inherits the ignore rules rather than guessing."""
+    print("\n--- moosemetrics ---")
+    data_path = os.path.join(SCRIPT_DIR, "data_docs")
+    passed = True
+
+    def run_metrics(args):
+        result = subprocess.run([METRICS_PATH] + args, capture_output=True,
+                                text=True, cwd=PROJECT_ROOT)
+        if result.returncode != 0:
+            print("Error: moosemetrics execution failed.")
+            print("Stderr:", result.stderr)
+            sys.exit(1)
+        return result.stdout
+
+    output = run_metrics(["--json", data_path])
+    document = json.loads(output)
+
+    if document.get("tool") != "moosemetrics":
+        print(f"FAIL: expected tool 'moosemetrics', got {document.get('tool')!r}")
+        passed = False
+    else:
+        print("PASS: moosemetrics emits its own JSON envelope")
+
+    # notes.md, todo.md, arch.puml, and drafts/wip.md, which is only skipped
+    # once the nested .gitignore is read
+    if not check("File Count (no ignore file)", document["totals"]["files"], 4):
+        passed = False
+    if not check("Open tasks", document["totals"]["openTasks"], 3):
+        passed = False
+    if not check("Completed tasks", document["totals"]["completedTasks"], 1):
+        passed = False
+    if not check("UML entities", document["totals"]["umlEntities"], 2):
+        passed = False
+
+    # The ignore rules are the whole point: the same syntax moosecount takes
+    output = run_metrics(["--json", "--gitignore", data_path])
+    document = json.loads(output)
+    if not check("File Count (--gitignore)", document["totals"]["files"], 3):
+        passed = False
+
+    paths = [entry["path"] for entry in document["files"]]
+    if any("drafts" in path for path in paths):
+        print(f"FAIL: the nested .gitignore should have excluded drafts/: {paths}")
+        passed = False
+    else:
+        print("PASS: moosemetrics honors a nested .gitignore")
+
+    output = run_metrics(["--json", "--exclude", "*.puml", data_path])
+    document = json.loads(output)
+    if not check("File Count (--exclude wildcard)", document["totals"]["files"], 3):
+        passed = False
 
     return passed
 
@@ -343,6 +465,49 @@ def test_unmatched_rule_warning():
 
     return passed
 
+def test_deterministic_order():
+    """Verifies the file listing is ordered, not left to the filesystem.
+
+    Traversal order is unspecified by the standard, so without sorting two
+    machines can print the same tree in different orders and the outputs
+    cannot be diffed.
+    """
+    print("\n--- Deterministic order ---")
+    data_path = os.path.join(SCRIPT_DIR, "data_paths")
+    passed = True
+
+    output, _ = run_moosecount([data_path])
+    listed = [line.split("\t", 1)[1] for line in output.splitlines()
+              if "\t" in line and line.split("\t", 1)[0].strip().isdigit()]
+
+    if listed != sorted(listed):
+        print(f"FAIL: paths are not in sorted order: {listed}")
+        passed = False
+    else:
+        print("PASS: paths are listed in sorted order")
+
+    # --sort orders by count, and ties still break on path so the run repeats
+    output, _ = run_moosecount(["--sort", data_path])
+    counts = [int(line.split("\t", 1)[0]) for line in output.splitlines()
+              if "\t" in line and line.split("\t", 1)[0].strip().isdigit()]
+
+    if counts != sorted(counts, reverse=True):
+        print(f"FAIL: --sort did not order by count: {counts}")
+        passed = False
+    else:
+        print("PASS: --sort orders by count, largest first")
+
+    # Two runs of the same tree must agree exactly
+    first, _ = run_moosecount([data_path])
+    second, _ = run_moosecount([data_path])
+    if first != second:
+        print("FAIL: two runs of the same tree produced different output")
+        passed = False
+    else:
+        print("PASS: repeated runs agree")
+
+    return passed
+
 def test_nested_ignore_files():
     """Verifies that a .gitignore inside a subfolder applies to that subfolder.
 
@@ -452,12 +617,15 @@ def test_negation_and_file_rules():
 def run_integration_test():
     results = [
         test_help_and_version(),
+        test_json_output(),
+        test_moosemetrics(),
         test_basic_totals(),
         test_ignore_file_patterns(),
         test_ignore_file_paths(),
         test_exclude_rule_forms(),
         test_cwd_relative_rules(),
         test_unmatched_rule_warning(),
+        test_deterministic_order(),
         test_nested_ignore_files(),
         test_negation_and_file_rules()
     ]

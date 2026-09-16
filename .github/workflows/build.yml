@@ -1,0 +1,28 @@
+name: build
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      # Without the submodule there is no googletest, and the build stops at
+      # add_subdirectory(google). This also proves the README's clone
+      # instructions are right.
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build and test
+        run: make test CMAKE_ARGS="-DMOOSECOUNT_WERROR=ON"
+
+      - name: Count this repository
+        run: make code-metrics

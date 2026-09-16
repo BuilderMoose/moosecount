@@ -11,7 +11,7 @@ bin_path    := $(mkfile_path)bin
 
 # Define the local paths for testing before installation
 MOOSECOUNT   := $(bin_path)/moosecount
-MOOSEMETRICS := python3 $(mkfile_path)moosemetrics.py
+MOOSEMETRICS := $(bin_path)/moosemetrics
 
 .PHONY: all build clean test install uninstall metrics code-metrics doc-metrics
 
@@ -37,8 +37,7 @@ test: build
 install: build
 	@mkdir -p $(PREFIX)/bin
 	@cp $(bin_path)/moosecount $(PREFIX)/bin/moosecount
-	@cp $(mkfile_path)moosemetrics.py $(PREFIX)/bin/moosemetrics
-	@chmod +x $(PREFIX)/bin/moosemetrics
+	@cp $(bin_path)/moosemetrics $(PREFIX)/bin/moosemetrics
 	@echo "Installed to $(PREFIX)/bin"
 	@echo "Ensure $(PREFIX)/bin is in your system PATH."
 
@@ -55,6 +54,6 @@ code-metrics: build
 	@echo "--- Running MooseCount ---"
 	@$(MOOSECOUNT) --exclude build --exclude bin --exclude google --exclude scratch .
 
-doc-metrics:
+doc-metrics: build
 	@echo "--- Running MooseMetrics ---"
 	@$(MOOSEMETRICS) --exclude google --exclude scratch .

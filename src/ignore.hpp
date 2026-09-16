@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -155,8 +156,14 @@ struct IgnoreRules
   // A rule the user typed that never matched is almost always a mistake. When
   // it is a path rule pointing outside every search root, say so specifically —
   // "matched nothing" would send them hunting for a typo that is not there.
-  void reportUnmatched(const std::string &flag, const std::vector<std::string> &searchRoots) const
+  // Returns (rule as typed, message) for every tracked rule that matched
+  // nothing. Returned rather than printed so the caller can put them on stderr
+  // and into a JSON document both.
+  std::vector<std::pair<std::string, std::string>> unmatchedRules(
+      const std::string &flag, const std::vector<std::string> &searchRoots) const
   {
+    std::vector<std::pair<std::string, std::string>> found;
+
     for (const auto &rule : rules)
     {
       if (!rule.tracked || rule.matched)
@@ -176,9 +183,11 @@ struct IgnoreRules
         }
       }
 
-      std::cerr << "Warning: " << flag << " \"" << rule.original << "\""
-                << (outside ? " is outside the paths being searched\n" : " matched nothing\n");
+      const std::string reason = outside ? "is outside the paths being searched" : "matched nothing";
+      found.push_back({rule.original, flag + " \"" + rule.original + "\" " + reason});
     }
+
+    return found;
   }
 };
 
