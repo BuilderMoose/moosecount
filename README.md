@@ -2,12 +2,21 @@
 
 A personalized, lightweight toolchain for tracking project metrics across both executable code and design documentation.
 
-1. **`moosecount`**: A fast, C++17 command-line tool for parsing C-style codebases (`.c`, `.cpp`, `.java`, `.ts`, and more).
+1. **`moosecount`**: A fast, C++17 command-line tool that counts source in eleven languages, each parsed by its own rules.
 2. **`moosemetrics`**: A Python 3 script for extracting structural metrics from Markdown, Text, and PlantUML design files.
 
 ---
 
 ## Installation
+
+This project uses googletest for its unit tests, vendored as a git submodule.
+Clone with submodules, or initialize them afterwards:
+
+```bash
+git clone --recurse-submodules <url>
+# or, in an existing clone
+git submodule update --init --recursive
+```
 
 This project utilizes CMake wrapped in a standard Makefile. You can install these tools directly to your user's local binary folder (`~/.local/bin`) so they act like native system commands across all your projects.
 
@@ -116,7 +125,44 @@ Warning: --exclude "tetss" matched nothing
 
 Rules read from an ignore file stay quiet, since a shared `.gitignore` listing folders that do not exist in the tree you are counting is perfectly normal.
 
-By default the following extensions are scanned: `.c`, `.cc`, `.cpp`, `.h`, `.hh`, `.hpp`, `.m`, `.mm`, `.java`, `.cs`, `.js`, `.ts`, `.kt`, `.swift`, `.go`, `.rs`. Files named directly on the command line are always counted, regardless of extension.
+### Languages
+
+Each language is counted by its own rules — its comment tokens, its string
+delimiters, and whether block comments nest — rather than by pretending
+everything is C.
+
+| Language | Extensions |
+| --- | --- |
+| C/C++ | `.c` `.cc` `.cpp` `.cxx` `.h` `.hh` `.hpp` `.hxx` |
+| Objective-C | `.m` `.mm` |
+| Java | `.java` |
+| C# | `.cs` |
+| JavaScript/TypeScript | `.js` `.jsx` `.mjs` `.ts` `.tsx` |
+| Kotlin | `.kt` `.kts` |
+| Swift | `.swift` |
+| Go | `.go` |
+| Rust | `.rs` |
+| Python | `.py` `.pyw` |
+| Shell | `.sh` `.bash` `.zsh` |
+
+Every extension above is scanned by default. Files named directly on the
+command line are always counted, whatever their extension.
+
+An extension added with `--ext` that no language claims is counted blank
+versus non-blank, with a warning saying so — rather than being parsed as C and
+quietly miscounted.
+
+**Format lines depend on the language.** They are lines holding nothing but
+structural characters, which for the C family means `{` and `}`. Python
+expresses structure through indentation, so Python files report no format
+lines at all. That is a property of the language, not a gap in the counting.
+
+**Known limitations**, both needing more than a state machine:
+
+- JavaScript regular expression literals. A `/` that starts a regex is
+  indistinguishable from division without parsing, so a regex containing a
+  quote will confuse string tracking.
+- Shell heredocs.
 
 **Example Run & Output:**
 
@@ -140,12 +186,12 @@ Comment Lines   = 45
 Blank Lines     = 60
 Total Lines     = 356
 
-By Extension
-  .cpp  = 227
-  .hpp  = 24
+By Language
+  C/C++	= 227
+  Python	= 24
 ```
 
-_(The `By Extension` breakdown is only printed when more than one extension was matched. Both it and the per-file column report Code Lines + Format Lines.)_
+_(The `By Language` breakdown is only printed when more than one language was matched. Both it and the per-file column report Code Lines + Format Lines.)_
 
 ---
 
@@ -195,10 +241,14 @@ PlantUML Files: 1
 
 ## 3. Testing
 
-The project uses an integration test wrapper to verify the output of `moosecount`.
-Sample files are stored in `tests/data/` and the wrapper script (`tests/run_tests.py`) runs the compiled binary against this data to ensure the parsing and counting logic remains accurate.
+Two suites, both run by `make test`:
 
-To run the integration test suite:
+- **Unit tests** (`tests/unit/`, googletest) link the library directly and cover
+  line classification per language, the ignore rule engine, and the wildcard
+  matcher.
+- **Integration tests** (`tests/run_tests.py`) run the compiled binary against
+  the fixture trees in `tests/data*/`, covering the CLI conventions and the
+  ignore behavior end to end.
 
 ```bash
 make test

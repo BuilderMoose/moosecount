@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Moose Metrics Suite: two independent metrics tools shipped from one repo.
 
-- **`moosecount`** — C++17 single-file tool (`main.cpp`) that counts lines in C-family/curly-brace source files.
+- **`moosecount`** — C++17 tool that counts lines of source in eleven languages, each parsed by its own `LanguageSpec`. `MoosecountLib` (`src/`) holds the work; `main.cpp` is the CLI.
 - **`moosemetrics`** — Python 3 single-file script (`moosemetrics.py`) that counts structure in Markdown/Text and PlantUML files.
 
 They share no code. The only coupling is the CLI convention (`--exclude <folder>`, positional paths defaulting to `.`) and the `Makefile` that builds, tests, and installs both.
@@ -17,7 +17,7 @@ They share no code. The only coupling is the CLI convention (`--exclude <folder>
 make                # same as `make build`
 make build          # cmake configure + build into bin/ (Release by default)
 make BUILD_TYPE=Debug
-make test           # builds, then runs tests/run_tests.py
+make test           # builds, then runs bin/tester and tests/run_tests.py
 make clean          # removes build/ and bin/
 make install        # bin/moosecount and moosemetrics.py -> ~/.local/bin (PREFIX overridable)
 make uninstall
@@ -28,23 +28,37 @@ The C++ binary is built via CMake, wrapped by the Makefile. CMake outputs `moose
 ## Run Metrics Against This Repo
 
 ```bash
-make code-metrics   # runs moosecount excluding build/, bin/, scratch/
+make code-metrics   # runs moosecount excluding build/, bin/, google/, scratch/
 make doc-metrics    # runs moosemetrics.py excluding scratch/
 make metrics        # runs both
 ```
 
 ## moosecount architecture
 
-`processFile()` is a single-pass character state machine over the whole file contents (`ParserState`: Normal / InString / InSingleComment / InMultiComment). Per line it accumulates a bitmask of `FLAG_CODE | FLAG_FORMAT | FLAG_COMMENT`; `tallyLine()` fires on `\n` (plus once more at EOF if the file lacks a trailing newline) and resolves the mask into the counters.
+Everything except the command line lives in `MoosecountLib` (`src/`), so the unit tests link it rather than shelling out to the binary. `main.cpp` is argument parsing and output formatting only.
+
+| File | Holds |
+| --- | --- |
+| `src/counting.hpp` | `CountTotals`, the four categories |
+| `src/language.hpp/.cpp` | `LanguageSpec`, the registry, extension lookup |
+| `src/parser.hpp/.cpp` | one state machine, driven by a `LanguageSpec` |
+| `src/ignore.hpp/.cpp` | the rule engine |
+| `src/walker.hpp/.cpp` | traversal and aggregation |
+
+`countSource(content, language)` is a single-pass character state machine (Normal / InString / InLineComment / InBlockComment). Per line it accumulates a bitmask of `FLAG_CODE | FLAG_FORMAT | FLAG_COMMENT`; `tallyLine()` fires on `\n` (plus once more at EOF if the file lacks a trailing newline) and resolves the mask into the counters. `processFile()` is a thin wrapper that reads a file and calls it — the in-memory form is what the tests drive.
 
 Classification rules that matter when changing the parser:
 
-- A **format line** is counted only if the line has `{`/`}` and *no* code and *no* comment. A line can be both code and comment.
-- The headline "Lines of Code" is `codeLines + formatLines`; that same sum is the per-file number printed in the left column and in the by-extension breakdown.
-- Strings are delimited by `"`, `'`, or backtick — all three are treated identically, so language-specific quoting (e.g. Python) is not modeled. This is why the tool targets curly-brace languages.
-- The `//`, `/*`, `*/`, and escape handling all advance `i` manually inside the loop; watch for double-advance bugs when editing.
+- A **format line** holds only `formatChars` and *no* code and *no* comment. A line can be both code and comment.
+- The headline "Lines of Code" is `codeLines + formatLines`; that same sum is the per-file number printed in the left column and in the by-language breakdown.
+- Whitespace is skipped before the state dispatch, so it never sets a flag. That is what makes "blank" mean "no non-whitespace characters" even inside a multi-line string, and it matches the spec in `design/0.3.0-requirements.md`.
+- An unterminated single-line string is closed at the newline rather than running on. Without that, one stray quote silently reclassifies the rest of a file.
+- `formatChars` is per language and empty for Python, so Python reports zero format lines by design, not by accident.
+- Comment tokens, string openers and escapes all advance `i` manually inside the loop; watch for double-advance bugs when editing.
 
-Traversal in `main()` skips any directory whose name starts with `.` (so `.git` needs no flag) or that matches `ignoredItems`, and skips dotfiles.
+Adding a language is a `LanguageSpec` in `src/language.cpp` and a test in `tests/unit/testLanguages.cpp`; nothing in the parser should need to change. The exceptions are gathered in `LanguageQuirks` — Rust lifetimes, hash raw strings, paren raw strings — so anything a table genuinely cannot express is visible in the data rather than buried in the state machine.
+
+Traversal in `countPaths()` (`src/walker.cpp`) skips any directory whose name starts with `.` (so `.git` needs no flag) or that matches the ignore rules, and skips dotfiles. It looks each file's extension up in the language registry, falling back to `genericLanguage()` and recording the extension in `report.unknownExtensions` so `main.cpp` can warn once.
 
 Both `--exclude` and `--ignore-file` feed the same `IgnoreRules` struct. `add()` normalizes a rule into an `IgnoreRule` — stripping a leading `!` (`negated`), a trailing `/` (`dirOnly`), and a leading `/` (`anchored`, also set by any embedded separator) — and appends it to an **ordered** vector. A rule has exactly one of three flavors, and getting the flavor wrong is how this code has broken before:
 
@@ -91,17 +105,20 @@ Single-file CLI using `argparse`. Parses `.md`/`.txt` files (lines, words, heade
 
 ## Testing
 
-`tests/run_tests.py` runs the built binary against `tests/data/` and regex-matches the `Key = Value` totals block in stdout against a hardcoded `EXPECTED_TOTALS` dict. Two consequences:
+Two suites, both run by `make test`.
+
+**Unit tests** — `tests/unit/`, googletest vendored as a submodule under `google/`. They link `MoosecountLib` directly: `testParser.cpp` and `testLanguages.cpp` drive `countSource()` with source held in memory, `testIgnoreRules.cpp` and `testGlobMatch.cpp` cover the rule engine. Run `./bin/tester` alone, and `--gtest_filter=TestLanguagesFixture.*` for one suite.
+
+**Integration tests** — `tests/run_tests.py` runs the built binary against the fixture trees and regex-matches the `Key = Value` totals block in stdout against hardcoded expectations. Two consequences:
 
 - Changing the totals output format (labels, `=` spacing) breaks the test parser, not just the values.
-- Adding or editing a file in `tests/data/` requires updating `EXPECTED_TOTALS` by hand.
+- Adding or editing a file under `tests/data*/` requires updating the expected counts by hand.
 
 `sample1.cpp` deliberately embeds `/* */` and `//` inside a string literal to pin the string-vs-comment precedence.
-
-There is no single-test runner — the suite is this one integration test. Run it directly with `python3 tests/run_tests.py` if `bin/moosecount` is already built.
 
 ## Conventions
 
 - `bin/` and `build/` are gitignored build output. Several test fixtures, however, are force-added: the fixture trees contain their own `.gitignore` files, so `git add` would silently skip the files those rules match. After touching fixtures, check `git ls-files --others --ignored --exclude-standard tests/` comes back empty.
-- CMake sets `-Wall -Wextra -pedantic -Wformat-security`; Release adds `-O3 -flto`.
-- `main.cpp` uses Allman braces and 2-space indent.
+- Warnings (`-Wall -Wextra -pedantic -Wformat-security`) are `target_compile_options` on our targets only, so googletest builds quietly. Release adds `-O3 -flto`.
+- The googletest submodule means a fresh clone needs `git submodule update --init --recursive`, and `make code-metrics` excludes `google/` so the vendored library is not counted as ours.
+- Sources use Allman braces and 2-space indent. Unit tests follow the mooseworks house style: a `TestXFixture` with ctor/SetUp/TearDown and `// -- --- --- ... . .......` separators.

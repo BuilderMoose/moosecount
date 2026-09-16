@@ -27,6 +27,8 @@ clean:
 	@rm -rf $(bin_path)
 
 test: build
+	@echo "--- Running Unit Tests ---"
+	@$(bin_path)/tester
 	@echo "--- Running Integration Tests ---"
 	@python3 tests/run_tests.py
 
@@ -51,8 +53,8 @@ metrics: code-metrics doc-metrics
 
 code-metrics: build
 	@echo "--- Running MooseCount ---"
-	@$(MOOSECOUNT) --exclude build --exclude bin --exclude scratch .
+	@$(MOOSECOUNT) --exclude build --exclude bin --exclude google --exclude scratch .
 
 doc-metrics:
 	@echo "--- Running MooseMetrics ---"
-	@$(MOOSEMETRICS) --exclude scratch .
+	@$(MOOSEMETRICS) --exclude google --exclude scratch .
